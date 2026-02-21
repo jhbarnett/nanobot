@@ -4,6 +4,7 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/root/.nanobot
+    - ~/.local/share/oauth-cli-kit:/root/.local/share/oauth-cli-kit
 
 services:
   nanobot-gateway:
