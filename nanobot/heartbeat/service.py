@@ -29,6 +29,13 @@ _HEARTBEAT_TOOL = [
                         "type": "string",
                         "description": "Natural-language summary of active tasks (required for run)",
                     },
+                    "notify": {
+                        "type": "boolean",
+                        "description": (
+                            "Whether to send the result as a message to the user's channel. "
+                            "Default true. Set false if HEARTBEAT.md instructs silent/no-notify mode."
+                        ),
+                    },
                 },
                 "required": ["action"],
             },
@@ -59,6 +66,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        notify: bool = True,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +75,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.notify = notify
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -82,14 +91,22 @@ class HeartbeatService:
                 return None
         return None
 
-    async def _decide(self, content: str) -> tuple[str, str]:
+    async def _decide(self, content: str) -> tuple[str, str, bool]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
-        Returns (action, tasks) where action is 'skip' or 'run'.
+        Returns (action, tasks, notify) where action is 'skip' or 'run' and
+        notify indicates whether the result should be sent to the user's channel.
+        The LLM may set notify=false when HEARTBEAT.md contains silent/no-notify
+        instructions; the config-level ``self.notify`` acts as a master override.
         """
         response = await self.provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
+                {"role": "system", "content": (
+                    "You are a heartbeat agent. Call the heartbeat tool to report your decision. "
+                    "If HEARTBEAT.md contains instructions about messaging or notification "
+                    "(e.g. 'silent', 'no-notify', 'do not send messages'), respect them by "
+                    "setting the notify parameter to false."
+                )},
                 {"role": "user", "content": (
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
@@ -100,10 +117,10 @@ class HeartbeatService:
         )
 
         if not response.has_tool_calls:
-            return "skip", ""
+            return "skip", "", True
 
         args = response.tool_calls[0].arguments
-        return args.get("action", "skip"), args.get("tasks", "")
+        return args.get("action", "skip"), args.get("tasks", ""), args.get("notify", True)
 
     async def start(self) -> None:
         """Start the heartbeat service."""
@@ -137,6 +154,16 @@ class HeartbeatService:
             except Exception as e:
                 logger.error("Heartbeat error: {}", e)
 
+    def _should_notify(self, llm_notify: bool) -> bool:
+        """Return True when the heartbeat result should be sent to the user.
+
+        The config-level ``self.notify`` is a master switch.  When it is True
+        the LLM's per-tick decision (derived from HEARTBEAT.md instructions)
+        is also honoured.  When the config disables notifications the LLM
+        decision is ignored.
+        """
+        return self.notify and llm_notify
+
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
         content = self._read_heartbeat_file()
@@ -147,7 +174,7 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
 
         try:
-            action, tasks = await self._decide(content)
+            action, tasks, llm_notify = await self._decide(content)
 
             if action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
@@ -156,18 +183,24 @@ class HeartbeatService:
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
                 response = await self.on_execute(tasks)
-                if response and self.on_notify:
+                if response and self.on_notify and self._should_notify(llm_notify):
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
+                elif response:
+                    logger.info("Heartbeat: completed (notify suppressed)")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
     async def trigger_now(self) -> str | None:
-        """Manually trigger a heartbeat."""
+        """Manually trigger a heartbeat.
+
+        Returns the execution result.  Notification delivery (if enabled) is
+        left to the caller — ``trigger_now`` only runs the task.
+        """
         content = self._read_heartbeat_file()
         if not content:
             return None
-        action, tasks = await self._decide(content)
+        action, tasks, _llm_notify = await self._decide(content)
         if action != "run" or not self.on_execute:
             return None
         return await self.on_execute(tasks)

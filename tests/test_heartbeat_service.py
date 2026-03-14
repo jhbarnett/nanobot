@@ -53,9 +53,10 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    action, tasks, notify = await service._decide("heartbeat content")
     assert action == "skip"
     assert tasks == ""
+    assert notify is True
 
 
 @pytest.mark.asyncio
@@ -152,9 +153,151 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    action, tasks, notify = await service._decide("heartbeat content")
 
     assert action == "run"
     assert tasks == "check open tasks"
+    assert notify is True
     assert provider.calls == 2
     assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_tick_suppresses_notify_when_config_disabled(tmp_path) -> None:
+    """Config-level notify=False should suppress message delivery."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check tasks", "notify": True},
+                )
+            ],
+        )
+    ])
+
+    executed = []
+    notified = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "done"
+
+    async def _on_notify(response: str) -> None:
+        notified.append(response)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        on_notify=_on_notify,
+        notify=False,
+    )
+
+    await service._tick()
+    assert executed == ["check tasks"]
+    assert notified == []  # notify suppressed by config
+
+
+@pytest.mark.asyncio
+async def test_tick_suppresses_notify_when_llm_says_no(tmp_path) -> None:
+    """LLM returning notify=false (from HEARTBEAT.md instructions) should suppress."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] silent task\nnotify: false", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "silent task", "notify": False},
+                )
+            ],
+        )
+    ])
+
+    executed = []
+    notified = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "done"
+
+    async def _on_notify(response: str) -> None:
+        notified.append(response)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        on_notify=_on_notify,
+        notify=True,  # config allows, but LLM says no
+    )
+
+    await service._tick()
+    assert executed == ["silent task"]
+    assert notified == []  # notify suppressed by LLM decision
+
+
+@pytest.mark.asyncio
+async def test_tick_sends_notify_when_both_allow(tmp_path) -> None:
+    """Notification should be sent when both config and LLM allow it."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] loud task", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "loud task", "notify": True},
+                )
+            ],
+        )
+    ])
+
+    executed = []
+    notified = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "done"
+
+    async def _on_notify(response: str) -> None:
+        notified.append(response)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        on_notify=_on_notify,
+        notify=True,
+    )
+
+    await service._tick()
+    assert executed == ["loud task"]
+    assert notified == ["done"]
+
+
+@pytest.mark.asyncio
+async def test_should_notify_logic(tmp_path) -> None:
+    """Unit test for _should_notify combining config and LLM signals."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test", notify=True,
+    )
+    assert service._should_notify(True) is True
+    assert service._should_notify(False) is False
+
+    service.notify = False
+    assert service._should_notify(True) is False
+    assert service._should_notify(False) is False
