@@ -25,7 +25,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
-    history_by_channel: bool = False  # when true, guild/group channels share a session but prioritize channel-specific context
+    history_policy: Literal["recent", "chats"] = "recent"  # "recent" = flat history; "chats" = per-channel context in guild/group sessions
 
 
 class AgentDefaults(Base):
