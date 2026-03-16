@@ -25,6 +25,7 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    history_policy: Literal["recent", "chats"] = "recent"  # "recent" = flat history; "chats" = per-channel context in guild/group sessions
 
 
 class AgentDefaults(Base):
@@ -39,6 +40,7 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
+    consolidation_model: str | None = None  # Model for memory consolidation (defaults to main model)
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
