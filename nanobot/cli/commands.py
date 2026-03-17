@@ -357,6 +357,19 @@ def _make_provider(config: Config):
     # OpenAI Codex (OAuth)
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         provider = OpenAICodexProvider(default_model=model)
+    # LiteLLM Proxy: external LiteLLM proxy/gateway server
+    elif provider_name == "litellm_proxy":
+        from nanobot.providers.litellm_proxy_provider import LiteLLMProxyProvider
+        if not p or not p.api_base:
+            console.print("[red]Error: LiteLLM Proxy requires api_base (the proxy URL).[/red]")
+            console.print("Set it in ~/.nanobot/config.json under providers.litellm_proxy section")
+            raise typer.Exit(1)
+        provider = LiteLLMProxyProvider(
+            api_key=p.api_key if p and p.api_key else "no-key",
+            api_base=p.api_base,
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
     # Custom: direct OpenAI-compatible endpoint, bypasses LiteLLM
     elif provider_name == "custom":
         from nanobot.providers.custom_provider import CustomProvider
@@ -1019,8 +1032,8 @@ def status():
                 continue
             if spec.is_oauth:
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
-            elif spec.is_local:
-                # Local deployments show api_base instead of api_key
+            elif spec.is_local or spec.name == "litellm_proxy":
+                # Local deployments and proxy show api_base instead of api_key
                 if p.api_base:
                     console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
                 else:

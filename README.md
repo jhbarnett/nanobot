@@ -779,6 +779,7 @@ Config file: `~/.nanobot/config.json`
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
+| `litellm_proxy` | LiteLLM Proxy (external gateway with fallback, OAuth, budgets) | [docs.litellm.ai](https://docs.litellm.ai/docs/proxy/quick_start) |
 | `custom` | Any OpenAI-compatible endpoint (direct, no LiteLLM) | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
@@ -833,6 +834,41 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>LiteLLM Proxy (External Gateway)</b></summary>
+
+Routes all LLM calls through an external [LiteLLM Proxy](https://docs.litellm.ai/docs/proxy/quick_start) server. The proxy handles provider selection, fallback, OAuth (Codex, Copilot), caching, budget tracking, and rate limiting — nanobot just sends requests to the proxy URL.
+
+**1. Start a LiteLLM Proxy** (see [LiteLLM docs](https://docs.litellm.ai/docs/proxy/quick_start)):
+```bash
+pip install 'litellm[proxy]'
+litellm --config litellm_config.yaml
+```
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "litellm_proxy": {
+      "apiBase": "http://localhost:4000",
+      "apiKey": "sk-your-litellm-key"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "litellm_proxy",
+      "model": "anthropic-claude"
+    }
+  }
+}
+```
+
+The `model` field should match a `model_name` in your LiteLLM proxy's `config.yaml`. The proxy handles all routing, fallback, and provider-specific auth.
+
+> Set `apiKey` to your LiteLLM virtual key. If the proxy has no auth, use any non-empty string (e.g. `"no-key"`).
 
 </details>
 

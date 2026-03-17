@@ -71,6 +71,16 @@ class ProviderSpec:
 # ---------------------------------------------------------------------------
 
 PROVIDERS: tuple[ProviderSpec, ...] = (
+    # === LiteLLM Proxy (external LiteLLM proxy/gateway server) ==============
+    ProviderSpec(
+        name="litellm_proxy",
+        keywords=("litellm-proxy", "litellm_proxy"),
+        env_key="",
+        display_name="LiteLLM Proxy",
+        litellm_prefix="",
+        is_direct=True,
+    ),
+
     # === Custom (direct OpenAI-compatible endpoint, bypasses LiteLLM) ======
     ProviderSpec(
         name="custom",
